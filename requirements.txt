@@ -1,5 +1,7 @@
-pyTelegramBotAPI
+aiogram
 flask
 requests
 wikipedia
 gTTS
+fpdf
+python-dotenv
