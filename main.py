@@ -1,13 +1,12 @@
 """
 All-in-One AI Bot (Telegram + Website)
-Features:
-- Direct AI chat (OpenRouter)
-- Commands: /ai, /wiki, /weather, /image, /meme, /speak, /joke, /notes, /pdf
-- Image upload (Telegram + Website) + ask question about uploaded image
-- Website chat UI (Flask) with file upload and same AI backend
-- Notes (per chat) stored in JSON
-- PDF generator (text -> pdf)
-Install requirements:
+Paste this complete file into your repo's main.py and commit.
+Requires environment variables:
+- TELEGRAM_TOKEN
+- OPENROUTER_API_KEY
+- OPENWEATHER_API_KEY (optional)
+- RAILWAY_BASE_URL (optional)
+Requirements (requirements.txt):
 aiogram
 flask
 requests
@@ -43,7 +42,6 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-# Optional base URL (your railway domain), if not set we'll build from request.host_url
 RAILWAY_BASE_URL = os.getenv("RAILWAY_BASE_URL", "")
 
 if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
@@ -74,15 +72,12 @@ def save_notes(d):
     NOTES_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def make_public_file_url(filename, host_url=None):
-    # If RAILWAY_BASE_URL set, use it, else use host_url passed from request
     base = RAILWAY_BASE_URL.rstrip("/") if RAILWAY_BASE_URL else (host_url.rstrip("/") if host_url else "")
     if not base:
-        # fallback: trying to construct but may not be accessible externally
         return f"/files/{filename}"
     return f"{base}/files/{quote_plus(filename)}"
 
 def call_openrouter_ai_sync(prompt):
-    """Synchronous call to OpenRouter Chat Completions (simple wrapper)."""
     try:
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -107,11 +102,9 @@ async def call_openrouter_ai(prompt):
 
 # ---------- Small utilities ----------
 def generate_image_url(prompt):
-    # Free quick image generator using Pollinations
     return f"https://image.pollinations.ai/prompt/{quote_plus(prompt)}"
 
 def generate_meme_url(text):
-    # simple memegen link (may vary)
     safe = text.replace(" ", "_")
     return f"https://api.memegen.link/images/custom/_/{safe}.png?background=https://i.imgur.com/8KcYpGf.png"
 
@@ -135,7 +128,6 @@ def make_pdf_from_text(text, filename=None):
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.set_font("Arial", size=12)
-        # split text lines
         for line in text.split("\n"):
             pdf.multi_cell(0, 6, line)
         pdf.output(str(path))
@@ -146,10 +138,9 @@ def make_pdf_from_text(text, filename=None):
 
 # ---------- Telegram Handlers ----------
 
-# set commands for three-dot menu
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message):
-    await message.reply("👋 Hello! I'm Aditya Singh's All-in-One AI Bot.\nJust ask anything or use menu commands (three dots).")
+    await message.reply("👋 Hello! I'm Aditya Singh's All-in-One AI Bot.\nAsk anything or use the three-dots menu for commands.")
 
 @dp.message_handler(commands=["ai"])
 async def cmd_ai(message: types.Message):
@@ -272,10 +263,9 @@ async def cmd_pdf(message: types.Message):
     else:
         await message.reply("PDF creation failed.")
 
-# Image uploads from Telegram
+# Photo upload via Telegram
 @dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
-    # save largest photo
     try:
         photo = message.photo[-1]
         file = await bot.get_file(photo.file_id)
@@ -284,20 +274,17 @@ async def handle_photo(message: types.Message):
         path = UPLOADS_DIR / fname
         with open(path, "wb") as f:
             f.write(data.read())
-        # tell user how to ask question
-        await message.reply(f"Image received and saved. To ask about this image, type:\nimg:{fname} <your question>\n(example: img:{fname} What is in this picture?)")
+        await message.reply(f"Image received. To ask about it, type:\nimg:{fname} <your question>\n(example: img:{fname} What is in this picture?)")
     except Exception as e:
         logging.exception("photo save error")
         await message.reply("Failed to save image.")
 
-# Handling image-question format: img:filename question
+# Image-question handler and direct chat handler
 @dp.message_handler()
 async def handle_text(message: types.Message):
     text = message.text.strip()
-    # ignore explicit commands (handled before)
     if text.startswith("/"):
         return
-    # if text starts with img: then user asks question about saved image
     if text.startswith("img:"):
         try:
             parts = text.split(maxsplit=1)
@@ -306,11 +293,10 @@ async def handle_text(message: types.Message):
             if not question:
                 await message.reply("Please add your question after image filename.")
                 return
-            # build public URL for image
-            host = ""  # we'll let Flask handler fill if needed
+            host = ""
             image_url = make_public_file_url(fname, host_url=RAILWAY_BASE_URL) if RAILWAY_BASE_URL else f"/files/{fname}"
-            prompt = f"User question about image: {question}\nImage URL: {image_url}\nPlease describe and answer the question based on the image."
-            await message.reply("⏳ Analyzing the image and answering...")
+            prompt = f"User question about image: {question}\nImage URL: {image_url}\nPlease describe and answer based on the image."
+            await message.reply("⏳ Analyzing image...")
             response = await call_openrouter_ai(prompt)
             await message.reply(response)
         except Exception as e:
@@ -318,12 +304,11 @@ async def handle_text(message: types.Message):
             await message.reply("Couldn't process your image question.")
         return
 
-    # Normal direct AI chat
     await message.reply("⏳ Thinking...")
     resp = await call_openrouter_ai(text)
     await message.reply(resp)
 
-# Set commands menu on startup
+# Set bot commands (three-dots menu)
 async def set_commands():
     cmds = [
         types.BotCommand("start", "Start the bot"),
@@ -410,7 +395,6 @@ def webchat():
     text = data.get("text","").strip()
     if not text:
         return jsonify({"reply":"Send some text."})
-    # handle image-question pattern as Telegram: img:filename question
     if text.startswith("img:"):
         try:
             parts = text.split(maxsplit=1)
@@ -426,7 +410,6 @@ def webchat():
         except Exception as e:
             logging.exception("web img error")
             return jsonify({"reply":"Could not process image question."})
-    # normal chat
     reply = call_openrouter_ai_sync(text)
     return jsonify({"reply": reply})
 
@@ -438,14 +421,12 @@ def upload_file():
     fname = f"{int(time.time())}_{f.filename}"
     path = UPLOADS_DIR / fname
     f.save(path)
-    # public url: build using host or env base
     host = request.host_url.rstrip("/")
     public = make_public_file_url(fname, host_url=host)
     return jsonify({"ok":True,"filename": fname, "url": public})
 
 @app.route("/files/<path:filename>")
 def serve_file(filename):
-    # serve uploaded files
     return send_from_directory(str(UPLOADS_DIR), filename, as_attachment=False)
 
 # ---------- Start both Flask and Bot ----------
@@ -454,10 +435,8 @@ def start_flask():
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # set commands then start bot and flask concurrently
     loop = asyncio.get_event_loop()
     loop.run_until_complete(set_commands())
-    # run flask in a thread then bot polling
     import threading
     t = threading.Thread(target=start_flask, daemon=True)
     t.start()
