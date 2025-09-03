@@ -1,5 +1,5 @@
 aiogram==2.25.1
-flask
+flask==2.3.3
 requests
 wikipedia
 gTTS
